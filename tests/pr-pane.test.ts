@@ -219,7 +219,7 @@ function fakeGh(on: Parameters<TestBody>[1], getPr: () => Record<string, unknown
     if (tool === 'git') stdout = 'feat/frob\n'
     else if (sub === 'repo') stdout = JSON.stringify({ nameWithOwner: 'acme/widgets', url: 'https://github.com/acme/widgets' })
     else if (isSearch) stdout = JSON.stringify(searchJson(e.argv.some(x => x.includes('body'))))
-    else if (sub === 'pr' && target !== '--json') stdout = JSON.stringify(listJson().find(p => String(p.number) === target))
+    else if (sub === 'pr' && target !== '--json') stdout = JSON.stringify(listJson().find(p => String(p.number) === target || p.url === target))
     else if (sub === 'pr') stdout = JSON.stringify(getPr())
     else stdout = JSON.stringify(threadsJson)
 
@@ -285,9 +285,14 @@ describe('multi PR', () => {
       [URL]: { status: 'ok' as const, error: '', fetchedAt: 1, pr },
       '57': { status: 'loading' as const, error: '', fetchedAt: 0, pr: null },
     }
-    const track = { isPaused: false, pins: [URL, '57'], selected: '', branch: 'feat/frob' }
+    const track = { isPaused: false, pins: [URL, '57'], peek: '', selected: '', branch: 'feat/frob' }
     const tabs = tabsOf(entries, track)
     expect(tabs.map(t => t.key)).toEqual(['mine', 'branch', '57'])
+    // the peek tabs last, marked; one that is also pinned, or shows the branch PR, is not drawn twice
+    const P60 = 'https://github.com/acme/widgets/pull/60'
+    const peeked = tabsOf(entries, { ...track, peek: P60 })
+    expect(peeked.map(t => [t.key, t.label])).toEqual([['mine', 'mine'], ['branch', '⎇ #42'], ['57', '#57'], [P60, '◇#60']])
+    expect(tabsOf(entries, { ...track, peek: '57' }).map(t => t.key)).toEqual(['mine', 'branch', '57'])
     expect(tabs[1]?.glyph).toBe('✗')
     expect(selectedOf(tabs, '')).toBe('branch')
     expect(selectedOf(tabs, '57')).toBe('57')
@@ -379,29 +384,57 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const drawn = JSON.stringify(await ui.drawn())
     expect(drawn.indexOf('"refresh"') > drawn.indexOf('nice')).toBe(true)
 
-    // Mine tab: search, filter, open one as a tab
+    // Mine tab: search, filter, open one as a tab; the field takes a new key after each Enter
+    const searchKey = async () => (await ui.find({ type: 'Input' }))?.key ?? 'search'
     await ui.press({ key: 'tab:mine' })
     expect(await ui.find({ key: 'mine:57' })).toBeDefined()
     // greptile scores land in the second pass
     expect(await ui.find({ type: 'Text', text: '3/5' })).toBeDefined()
-    await ui.input({ key: 'search', text: 'sprocket', kind: 'change' })
+    await ui.input({ key: await searchKey(), text: 'sprocket', kind: 'change' })
     expect(await ui.find({ key: 'mine:42' })).toBeUndefined()
-    await ui.input({ key: 'search', text: '' })
-    await ui.select({ key: 'filter', value: 'draft' })
+    await ui.input({ key: await searchKey(), text: '' })
+    // filters are chips: one per filter with hits, plus all and the active one
+    expect(await ui.find({ key: 'filter:running' })).toBeUndefined()
+    await ui.press({ key: 'filter:draft' })
     expect(await ui.find({ key: 'mine:60' })).toBeDefined()
     expect(await ui.find({ key: 'mine:57' })).toBeUndefined()
     await ui.press({ key: 'clear' })
+    expect(await ui.find({ key: 'mine:57' })).toBeDefined()
+
+    // a pick opens the PR as the peek; the next pick replaces it
+    const P57 = 'https://github.com/acme/widgets/pull/57'
+    const P60 = 'https://github.com/acme/widgets/pull/60'
+    await ui.press({ key: 'mine:60' })
+    expect(await ui.find({ type: 'Text', text: /WIP gizmo/ })).toBeDefined()
+    expect(await ui.find({ key: `tab:${P60}` })).toBeDefined()
+    await ui.press({ key: 'tab:mine' })
     await ui.press({ key: 'mine:57' })
     expect(await ui.find({ type: 'Text', text: /Speed up sprocket cache/ })).toBeDefined()
-    expect(await ui.find({ key: 'tab:57' })).toBeDefined()
+    expect(await ui.find({ key: `tab:${P57}` })).toBeDefined()
+    expect(await ui.find({ key: `tab:${P60}` })).toBeUndefined()
     // status line: the drawn PR in full, every other tracked one after it
     expect(statuses[statuses.length - 1]).toMatch(/^PR #57 .*│ #42 ✗$/)
-    // back to the branch PR, then unpin 57
-    await ui.press({ key: 'tab:branch' })
+    // p keeps it; a pick of the branch's PR draws the branch tab
+    await ui.press({ key: 'pin' })
+    expect(await ui.find({ key: 'pin' })).toBeUndefined()
+    await ui.press({ key: 'tab:mine' })
+    await ui.press({ key: 'mine:42' })
     expect(await ui.find({ type: 'Text', text: /Add widget frobnicator/ })).toBeDefined()
-    await ui.press({ key: 'tab:57' })
+    // Enter in the search with one hit opens it
+    await ui.press({ key: 'tab:mine' })
+    const before = await searchKey()
+    await ui.input({ key: before, text: 'gizmo' })
+    expect(await ui.find({ type: 'Text', text: /WIP gizmo/ })).toBeDefined()
+    expect(await ui.find({ key: `tab:${P60}` })).toBeDefined()
+    // closing the peek goes back to the list
     await ui.press({ key: 'unpin' })
-    expect(await ui.find({ key: 'tab:57' })).toBeUndefined()
+    expect(await ui.find({ key: `tab:${P60}` })).toBeUndefined()
+    expect(await searchKey()).not.toBe(before)
+    expect((await ui.find({ type: 'Input' }))?.props.value).toBe('gizmo')
+    // the pinned one unpins
+    await ui.press({ key: `tab:${P57}` })
+    await ui.press({ key: 'unpin' })
+    expect(await ui.find({ key: `tab:${P57}` })).toBeUndefined()
 
     // q closes the pane
     await ui.press({ key: 'close' })

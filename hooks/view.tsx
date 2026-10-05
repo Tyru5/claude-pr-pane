@@ -41,13 +41,19 @@ export type Actions = {
   close: () => void
   select: (key: string) => void
   unpin: (key: string) => void
+  /** a Mine row: its tab when it has one, else it opens as the peek */
   pick: (item: PrListItem) => void
+  /** keep the peek as a pinned tab */
+  pinPeek: () => void
   setQuery: (query: string) => void
+  /** Enter in the search: one hit opens, several put the ring on the first */
+  submitSearch: (query: string, hits: PrListItem[]) => void
+  focusSearch: () => void
   setFilter: (filter: MineFilter) => void
 }
 
 /** One tab: Mine, the branch's PR, or a pin. */
-export type Tab = { key: string; label: string; glyph: string; color: string; greptile?: GreptileScore | null }
+export type Tab = { key: string; label: string; glyph: string; color: string; greptile?: GreptileScore | null; isPeek?: boolean }
 
 export type Model = {
   entries: Record<string, PrEntry>
@@ -60,6 +66,8 @@ export type Model = {
   tabs: Tab[]
   /** the tab drawn: always one of `tabs` */
   selected: string
+  /** the search field's key: a new one after each Enter, since the field empties on submit and only a new element draws the query back */
+  searchKey: string
 }
 
 export const MINE = 'mine'
@@ -103,7 +111,7 @@ function pinLabel(key: string, e: PrEntry | undefined): string {
   return `#${m ? m[1] : key}`
 }
 
-/** Mine first, then the branch's PR (when it has one), then pins; a PR shown twice keeps its first tab. */
+/** Mine first, then the branch's PR (when it has one), pins, the peek; a PR shown twice keeps its first tab. */
 export function tabsOf(entries: Record<string, PrEntry>, track: PrTrack): Tab[] {
   const tabs: Tab[] = [{ key: MINE, label: 'mine', glyph: '', color: '' }]
   const seen = new Set<string>()
@@ -124,6 +132,11 @@ export function tabsOf(entries: Record<string, PrEntry>, track: PrTrack): Tab[] 
       seen.add(e.pr.url)
     }
     tabs.push({ key, label: pinLabel(key, e), ...glyphOf(e), greptile: e?.pr?.greptile })
+  }
+  const peek = track.peek ?? ''
+  const e = entries[peek]
+  if (peek && !track.pins.includes(peek) && !(e?.pr && seen.has(e.pr.url))) {
+    tabs.push({ key: peek, label: `◇${pinLabel(peek, e)}`, ...glyphOf(e), greptile: e?.pr?.greptile, isPeek: true })
   }
 
   return tabs
@@ -453,7 +466,9 @@ function prKeys(L: Layout, m: Model, pr: PrSnapshot | null, a: Actions): Key[] {
       out.push({ key: 'fix', hotkey: 'f', label: 'fix', onPress: () => a.fix(pr) })
     }
   }
-  if (m.selected !== BRANCH) out.push({ key: 'unpin', hotkey: 'x', label: 'unpin', onPress: () => a.unpin(m.selected) })
+  const isPeek = m.selected === (m.track.peek ?? '')
+  if (isPeek) out.push({ key: 'pin', hotkey: 'p', label: 'pin', onPress: a.pinPeek })
+  if (m.selected !== BRANCH) out.push({ key: 'unpin', hotkey: 'x', label: isPeek ? 'close tab' : 'unpin', onPress: () => a.unpin(m.selected) })
 
   const view: Key[] = []
   if (pr) {
@@ -477,9 +492,10 @@ function prKeys(L: Layout, m: Model, pr: PrSnapshot | null, a: Actions): Key[] {
   return [...out, ...view.map(k => ({ ...k, group: 'view' as const }))]
 }
 
-function mineKeys(m: Model, a: Actions): Key[] {
+function mineKeys(els: Els, m: Model, a: Actions): Key[] {
   const v = m.view
   const out: Key[] = [{ key: 'refresh', hotkey: 'r', label: 'refresh', onPress: a.refresh }]
+  if ('Input' in els) out.push({ key: 'find', hotkey: 's', label: 'search', onPress: a.focusSearch })
   if ((v.query ?? '') !== '' || (v.filter ?? 'all') !== 'all') {
     out.push({
       key: 'clear',
@@ -638,31 +654,35 @@ function mineBody(els: Els, L: Layout, m: Model, a: Actions): Node[] {
       const { Input } = els
       out.push(
         <Input
-          key="search"
+          key={m.searchKey}
           label="search "
           placeholder="title, branch or #number"
           value={query}
-          submitLabel="filter"
+          submitLabel={hits.length === 1 ? 'open' : 'to list'}
           onInput={q => a.setQuery(q)}
-          onSubmit={q => a.setQuery(q)}
+          onSubmit={q => a.submitSearch(q, items.filter(it => isFilterMatch(it, filter) && isQueryMatch(it, q)))}
         />,
       )
     }
-    if ('Select' in els) {
-      const { Select } = els
-      out.push(
-        <Select
-          key="filter"
-          label="show "
-          value={filter}
-          options={MINE_FILTERS.map(f => ({
-            value: f.value,
-            label: `${f.label} (${items.filter(it => isFilterMatch(it, f.value)).length})`,
-          }))}
-          onSelect={f => a.setFilter(f as MineFilter)}
-        />,
-      )
-    }
+    // filters as chips, not a Select: arrowing up the list onto a Select pops it open and traps the arrows
+    out.push(
+      <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
+        {MINE_FILTERS.map(f => ({ ...f, n: items.filter(it => isFilterMatch(it, f.value)).length }))
+          .filter(f => f.value === 'all' || f.value === filter || f.n > 0)
+          .map(f => (
+            <Box flexDirection="row" flexShrink={0}>
+              <Text color="cyan">{f.value === filter ? '▸' : ' '}</Text>
+              <Button
+                key={`filter:${f.value}`}
+                plain
+                dimColor={f.value !== filter}
+                label={`${f.label} ${f.n}`}
+                onPress={() => a.setFilter(f.value)}
+              />
+            </Box>
+          ))}
+      </Box>,
+    )
   }
 
   const branch = m.entries[BRANCH]
@@ -727,8 +747,12 @@ function mineBody(els: Els, L: Layout, m: Model, a: Actions): Node[] {
 function entryEmpty(els: Els, m: Model, e: PrEntry | undefined): Node[] {
   const { Text } = els
   const isError = e?.status === 'error'
+  // opened from Mine: its row is known, so name it while the full PR loads
+  const row = m.mine.items.find(it => it.url === m.selected || String(it.number) === m.selected)
   const msg = !e || e.status === 'loading' || e.status === 'ok'
-    ? 'Loading pull request…'
+    ? row
+      ? `Loading #${row.number} ${row.title}…`
+      : 'Loading pull request…'
     : e.status === 'none'
       ? `No pull request ${m.selected === BRANCH ? `for ${m.track.branch || 'this branch'}` : m.selected}.`
       : `gh failed: ${clip(e.error, 400)}`
@@ -817,12 +841,12 @@ export function drawPane(els: Els, L: Layout, m: Model, a: Actions): Node {
   if (m.selected === MINE) {
     const status = m.mine.fetchedAt ? `${clockOf(m.mine.fetchedAt)} · ${m.tabs.length - 1} tracked` : 'loading'
 
-    return frame(els, L, [tabs, gap, ...mineBody(els, L, m, a)], footerRows(els, L, m, mineKeys(m, a), status, m.mine.status === 'error'))
+    return frame(els, L, [tabs, gap, ...mineBody(els, L, m, a)], footerRows(els, L, m, mineKeys(els, m, a), status, m.mine.status === 'error'))
   }
 
   const e = m.entries[m.selected]
   const pr = e?.pr ?? null
-  const where = m.selected === BRANCH ? m.track.branch || 'branch' : 'pinned'
+  const where = m.selected === BRANCH ? m.track.branch || 'branch' : m.selected === m.track.peek ? 'preview · p pins it' : 'pinned'
   const status = `${e?.status === 'error' ? '⚠ gh failed · ' : ''}${e?.fetchedAt ? clockOf(e.fetchedAt) : 'loading'} · ${where}`
   const footer = footerRows(els, L, m, prKeys(L, m, pr, a), status, e?.status === 'error')
   if (!pr) return frame(els, L, [tabs, gap, ...entryEmpty(els, m, e)], footer)

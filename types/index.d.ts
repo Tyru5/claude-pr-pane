@@ -87,7 +87,9 @@ export type PrTrack = {
   isPaused: boolean
   /** pinned targets, in tab order: numbers (`42`) or urls */
   pins: string[]
-  /** the tab drawn: `mine`, `branch`, or a pin */
+  /** a PR opened from Mine, not yet pinned: one at a time, the next pick replaces it */
+  peek: string
+  /** the tab drawn: `mine`, `branch`, a pin or the peek */
   selected: string
   branch: string
 }

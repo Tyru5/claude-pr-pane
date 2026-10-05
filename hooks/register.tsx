@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { MineFilter, PrEntry, PrMerge, PrMine, PrSnapshot, PrTrack, PrView } from '../types'
+import type { MineFilter, PrEntry, PrListItem, PrMerge, PrMine, PrSnapshot, PrTrack, PrView } from '../types'
 import {
   allowedMethods,
   checkCounts,
@@ -41,6 +41,7 @@ const entriesAtom = atom({ plugin: 'pr-pane', key: 'entries' } as const, {} as R
 const trackAtom = atom({ plugin: 'pr-pane', key: 'track' } as const, {
   isPaused: false,
   pins: [],
+  peek: '',
   selected: '',
   branch: '',
 } as PrTrack)
@@ -127,7 +128,15 @@ function statusLine(pr: PrSnapshot): string {
 
 // module vars reset on reload; the old env's timers are dropped with it
 let timer: Timer | undefined
+let isTimerSet = false
 let isFetching = false
+// keys being fetched now: the poll and a pick never fetch one twice at once
+const inFlight = new Set<string>()
+// the pane holds the keyboard: only then can the ring be moved
+let isPaneFocused = false
+// bumped on each search submit (see Model.searchKey)
+let searchGen = 0
+const searchKey = () => (searchGen ? `search-${searchGen}` : 'search')
 // terminal width last seen, and the dock width last asked for it
 let termColumns = 0
 let askedColumns = 0
@@ -152,14 +161,33 @@ function patchEntry($: EngineInterface, key: string, patch: Partial<PrEntry>) {
 
 function schedule($: EngineInterface, ms: number) {
   timer?.cancel()
-  timer = $.clock.after(ms, () => void refresh($))
+  isTimerSet = true
+  timer = $.clock.after(ms, () => {
+    isTimerSet = false
+    void refresh($)
+  })
+}
+
+function stopTimer() {
+  timer?.cancel()
+  isTimerSet = false
 }
 
 /** One PR's poll: the delay it asks for, how many changes it saw, whether gh failed. */
 type Fetched = { ms: number; changes: number; isFailed: boolean }
 
-/** Fetches one tracked PR. */
+/** Fetches one tracked PR; one already being fetched is left to that fetch. */
 async function fetchEntry($: EngineInterface, key: string, target: string, now: number): Promise<Fetched> {
+  if (inFlight.has(key)) return { ms: POLL_IDLE_MS, changes: 0, isFailed: false }
+  inFlight.add(key)
+  try {
+    return await fetchEntryOnce($, key, target, now)
+  } finally {
+    inFlight.delete(key)
+  }
+}
+
+async function fetchEntryOnce($: EngineInterface, key: string, target: string, now: number): Promise<Fetched> {
   const prev = (await read($, entriesAtom))[key]
   if (!prev?.fetchedAt) await patchEntry($, key, { status: 'loading' })
 
@@ -262,7 +290,7 @@ async function refresh($: EngineInterface, opts: { isMineDue?: boolean; isManual
   try {
     const track = await read($, trackAtom)
     if (track.isPaused) {
-      timer?.cancel()
+      stopTimer()
 
       return
     }
@@ -273,13 +301,14 @@ async function refresh($: EngineInterface, opts: { isMineDue?: boolean; isManual
     if (branch !== track.branch) await update($, trackAtom, t => ({ ...t, branch }))
     const now = await $.clock.now()
 
-    // outside a repo only pins (urls) and an explicit Mine ask are worth a gh call
+    // outside a repo only pins / the peek (urls) and an explicit Mine ask are worth a gh call
     const mine = await read($, mineAtom)
     const isMineDue = opts.isMineDue || track.selected === MINE || (isRepo && now - mine.fetchedAt > MINE_STALE_MS)
-    const targets = [...(isRepo ? [[BRANCH, '']] : []), ...track.pins.map(p => [p, p])] as [string, string][]
+    const peek = track.peek && !track.pins.includes(track.peek) ? [[track.peek, track.peek]] : []
+    const targets = [...(isRepo ? [[BRANCH, '']] : []), ...track.pins.map(p => [p, p]), ...peek] as [string, string][]
     if (!targets.length && !isMineDue) {
       isIdle = true
-      timer?.cancel()
+      stopTimer()
       if (opts.isManual) $.ui.toast('Not in a git repo: pin a PR url to track it', { timeoutMs: 4_000 })
 
       return
@@ -342,36 +371,127 @@ async function showStatus($: EngineInterface) {
   $.ui.status(leadPr ? [statusLine(leadPr), ...shown, ...more].join(' │ ') : undefined)
 }
 
+/** Moves the ring to one of the pane's elements; only the person can give the pane the keyboard. */
+function focusKey($: EngineInterface, key: string) {
+  if (!isPaneFocused) return
+  $.ui.focus({ requestId: PANE, key }).catch(() => undefined)
+}
+
+/**
+ * Draws a tab. The ring follows: onto the tab itself (so a PR opens at its top,
+ * not wherever the old ring index lands), or back on Mine, onto the row of the
+ * PR just left, so the list keeps the place.
+ */
 async function select($: EngineInterface, key: string) {
+  const was = await read($, trackAtom)
+  const entries = await read($, entriesAtom)
+  const drawn = selectedOf(tabsOf(entries, was), was.selected)
   await update($, trackAtom, t => ({ ...t, selected: key }))
   await showStatus($)
   const mine = await read($, mineAtom)
+  if (key === MINE) {
+    const left = entries[drawn]?.pr
+    const row = left && mine.items.find(it => it.url === left.url)
+    focusKey($, row ? `mine:${row.number}` : `tab:${MINE}`)
+  } else {
+    focusKey($, `tab:${key}`)
+  }
   if (key === MINE && (mine.status !== 'ok' || (await $.clock.now()) - mine.fetchedAt > MINE_STALE_MS)) void fetchMine($)
 }
 
-/** Adds pins (deduped) and draws the last one. */
-async function pin($: EngineInterface, keys: string[]) {
-  if (!keys.length) return
-  await update($, trackAtom, t => ({
-    ...t,
-    isPaused: false,
-    pins: [...t.pins, ...keys.filter(k => !t.pins.includes(k))],
-    selected: keys[keys.length - 1] ?? t.selected,
-  }))
-  void refresh($)
+/** Fetches one PR now, outside the poll (which may be mid-run), and keeps the poll going. */
+async function loadNow($: EngineInterface, key: string) {
+  const now = await $.clock.now()
+  try {
+    const got = await fetchEntry($, key, key, now)
+    if (!isTimerSet && !isFetching) schedule($, got.ms)
+  } catch (err) {
+    await patchEntry($, key, { status: 'error', error: err instanceof Error ? err.message : String(err), fetchedAt: now })
+  }
+  await showStatus($)
 }
 
-async function unpin($: EngineInterface, key: string) {
-  await update($, trackAtom, t => ({
-    ...t,
-    pins: t.pins.filter(p => p !== key),
-    selected: t.selected === key ? '' : t.selected,
-  }))
-  await update($, entriesAtom, all => {
+/** Drops a fetched PR no tab shows any more. */
+function forget($: EngineInterface, key: string) {
+  return update($, entriesAtom, all => {
     const { [key]: _gone, ...rest } = all
     return rest
   })
+}
+
+/** Adds pins (deduped), draws the last one and fetches the new ones. */
+async function pin($: EngineInterface, keys: string[]) {
+  if (!keys.length) return
+  const was = await read($, trackAtom)
+  const added = keys.filter(k => !was.pins.includes(k))
+  await update($, trackAtom, t => ({
+    ...t,
+    isPaused: false,
+    pins: [...t.pins, ...added],
+    peek: added.includes(t.peek) ? '' : t.peek,
+    selected: keys[keys.length - 1] ?? t.selected,
+  }))
+  void (async () => {
+    for (const k of added) await loadNow($, k)
+  })()
+}
+
+/**
+ * A Mine row: its tab when one shows it already, else it opens as the peek,
+ * the one unpinned tab, which the next pick replaces (`p` keeps it).
+ */
+async function pick($: EngineInterface, item: PrListItem) {
+  const entries = await read($, entriesAtom)
+  const track = await read($, trackAtom)
+  const hit = tabsOf(entries, track).find(
+    t => t.key !== MINE && (t.key === item.url || t.key === String(item.number) || entries[t.key]?.pr?.url === item.url),
+  )
+  if (hit) return select($, hit.key)
+
+  const old = track.peek ?? ''
+  await update($, trackAtom, t => ({ ...t, isPaused: false, peek: item.url, selected: item.url }))
+  if (old && !track.pins.includes(old)) await forget($, old)
+  focusKey($, `tab:${item.url}`)
+  await loadNow($, item.url)
+}
+
+async function pinPeek($: EngineInterface) {
+  const track = await read($, trackAtom)
+  if (!track.peek) return
+  const pr = (await read($, entriesAtom))[track.peek]?.pr
+  await update($, trackAtom, t => ({ ...t, pins: t.pins.includes(t.peek) ? t.pins : [...t.pins, t.peek], peek: '' }))
+  $.ui.toast(`Pinned ${pr ? `#${pr.number}` : track.peek}`, { timeoutMs: 3_000 })
   await showStatus($)
+}
+
+async function unpin($: EngineInterface, key: string) {
+  const was = await read($, trackAtom)
+  const url = (await read($, entriesAtom))[key]?.pr?.url ?? key
+  await update($, trackAtom, t => ({
+    ...t,
+    pins: t.pins.filter(p => p !== key),
+    peek: t.peek === key ? '' : t.peek,
+    // a closed peek goes back to the list it came from
+    selected: t.selected !== key ? t.selected : t.peek === key ? MINE : '',
+  }))
+  await forget($, key)
+  await showStatus($)
+  if (was.peek === key && was.selected === key) {
+    const row = (await read($, mineAtom)).items.find(it => it.url === url)
+    focusKey($, row ? `mine:${row.number}` : `tab:${MINE}`)
+  }
+}
+
+/** Enter in the search: one hit opens; several put the ring on the first, so the arrows walk the hits. */
+async function submitSearch($: EngineInterface, query: string, hits: PrListItem[]) {
+  searchGen += 1
+  await update($, viewAtom, v => ({ ...v, query }))
+  // the query may be unchanged (onInput set it): redraw for the new key anyway
+  $.ui.invalidate('ui.render')
+  const [first] = hits
+  if (!first) return focusKey($, searchKey())
+  if (hits.length === 1) await pick($, first)
+  else focusKey($, `mine:${first.number}`)
 }
 
 async function reseat($: EngineInterface) {
@@ -407,7 +527,7 @@ export const register: Register = on => {
     const [verb = '', ...rest] = words
 
     if (verb === 'off' || verb === 'stop') {
-      timer?.cancel()
+      stopTimer()
       await update($, trackAtom, t => ({ ...t, isPaused: true }))
       $.ui.status(undefined)
       await $.ui.close({ id: PANE })
@@ -451,6 +571,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
+    isPaneFocused = e.props.isFocused
     // terminal resized: ask the dock for a width that fits it (a width the person dragged still wins)
     const term = e.viewport?.columns ?? 0
     if (term && e.props.placement === 'dock' && paneColumns(term) !== askedColumns) {
@@ -475,6 +596,7 @@ export const register: Register = on => {
       command: COMMAND,
       tabs,
       selected: selectedOf(tabs, track.selected),
+      searchKey: searchKey(),
     }
     const actions: Actions = {
       refresh: () => void refresh($, { isMineDue: model.selected === MINE, isManual: true }),
@@ -511,13 +633,11 @@ export const register: Register = on => {
       },
       select: key => void select($, key),
       unpin: key => void unpin($, key),
-      pick: item => {
-        // already a tab: draw it; else pin it
-        const hit = Object.entries(entries).find(([, en]) => en.pr?.url === item.url)
-        if (hit && tabs.some(t => t.key === hit[0])) void select($, hit[0])
-        else void pin($, [String(item.number)])
-      },
+      pick: item => void pick($, item),
+      pinPeek: () => void pinPeek($),
       setQuery: query => void update($, viewAtom, v => ({ ...v, query })),
+      submitSearch: (query, hits) => void submitSearch($, query, hits),
+      focusSearch: () => focusKey($, searchKey()),
       setFilter: (filter: MineFilter) => void update($, viewAtom, v => ({ ...v, filter })),
     }
 
