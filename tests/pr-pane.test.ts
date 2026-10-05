@@ -426,6 +426,29 @@ for (const surface of ['terminal', 'desktop'] as const) {
   })
 }
 
+test('outside a git repo with no pins, polling stops', async ($, on) => {
+  const clock = mock.clock(on, { now: Date.parse('2026-10-04T10:05:00Z') })
+  const ran: string[] = []
+  on('process.run', async (_$, e) => {
+    ran.push(e.argv.slice(0, 2).join(' '))
+    const isGit = e.argv[0] === 'git'
+    const stderr = isGit ? 'fatal: not a git repository' : 'not a git repository'
+
+    return { value: { exitCode: 128, stdout: '', stderr, isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  const ui = await $.ui.mount({ plugin: 'pr-pane', surface: 'terminal', component: 'Pane', requestId: 'pr', props: PANE_PROPS })
+  // the drawn tab is Mine, so the press asks for the list: one gh call, no branch PR poll
+  await ui.press({ key: 'refresh' })
+  expect(ran).toEqual(['git branch', 'gh repo'])
+  // the timer's poll finds nothing to track and does not reschedule
+  await clock.advance(10 * 60_000)
+  const settled = ran.length
+  expect(ran.filter(r => r.startsWith('gh pr'))).toEqual([])
+  await clock.advance(10 * 60_000)
+  expect(ran.length).toBe(settled)
+  await ui.unmount()
+})
+
 describe('merge', () => {
   test('T3 conflict prompt', async () => {
     const pr = normalize(prJson({ mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' }), [])

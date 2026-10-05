@@ -257,6 +257,8 @@ async function refresh($: EngineInterface, opts: { isMineDue?: boolean; isManual
   let changed = 0
   let failed = 0
   let nextMs = POLL_SLOW_MS
+  // nothing to poll (no repo, no pins): leave the timer off until asked again
+  let isIdle = false
   try {
     const track = await read($, trackAtom)
     if (track.isPaused) {
@@ -266,16 +268,27 @@ async function refresh($: EngineInterface, opts: { isMineDue?: boolean; isManual
     }
 
     const git = await $.process.run(['git', 'branch', '--show-current'], { timeoutMs: 5_000 })
-    const branch = git.exitCode === 0 ? git.stdout.trim() : ''
+    const isRepo = git.exitCode === 0
+    const branch = isRepo ? git.stdout.trim() : ''
     if (branch !== track.branch) await update($, trackAtom, t => ({ ...t, branch }))
     const now = await $.clock.now()
 
-    // the list runs beside the PR polls, so the Mine tab never waits on them
+    // outside a repo only pins (urls) and an explicit Mine ask are worth a gh call
     const mine = await read($, mineAtom)
-    const isMineDue = opts.isMineDue || track.selected === MINE || now - mine.fetchedAt > MINE_STALE_MS
+    const isMineDue = opts.isMineDue || track.selected === MINE || (isRepo && now - mine.fetchedAt > MINE_STALE_MS)
+    const targets = [...(isRepo ? [[BRANCH, '']] : []), ...track.pins.map(p => [p, p])] as [string, string][]
+    if (!targets.length && !isMineDue) {
+      isIdle = true
+      timer?.cancel()
+      if (opts.isManual) $.ui.toast('Not in a git repo: pin a PR url to track it', { timeoutMs: 4_000 })
+
+      return
+    }
+
+    // the list runs beside the PR polls, so the Mine tab never waits on them
     const mineDone = isMineDue ? fetchMine($) : Promise.resolve()
 
-    for (const [key, target] of [[BRANCH, ''], ...track.pins.map(p => [p, p])] as [string, string][]) {
+    for (const [key, target] of targets) {
       try {
         const got = await fetchEntry($, key, target, now)
         nextMs = Math.min(nextMs, got.ms)
@@ -302,7 +315,7 @@ async function refresh($: EngineInterface, opts: { isMineDue?: boolean; isManual
   } finally {
     isFetching = false
     const track = await read($, trackAtom)
-    if (!track.isPaused) schedule($, nextMs)
+    if (!track.isPaused && !isIdle) schedule($, nextMs)
   }
 }
 
