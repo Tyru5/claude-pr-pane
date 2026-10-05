@@ -1,0 +1,7 @@
+{
+  "name": "pr-pane",
+  "version": "0.1.0",
+  "description": "Live GitHub PR pane: checks, reviews, threads, comments; polls gh and redraws on change",
+  "author": { "name": "Tyrus Malmstrom" },
+  "types": "./types/index.d.ts"
+}
