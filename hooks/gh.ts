@@ -610,6 +610,34 @@ export function fixCheckPrompt(pr: PrSnapshot, check: PrCheck, isCheckedOut: boo
   ].join('\n')
 }
 
+/** A GitHub Actions run, from a check's details url (`…/actions/runs/<id>[/job/<id>]`); null for other hosts (Vercel, status contexts). */
+export type RunRef = { host: string; owner: string; repo: string; runId: string }
+
+export function parseRunUrl(url: string): RunRef | null {
+  const m = /^https?:\/\/([^/]+)\/([^/]+)\/([^/]+)\/actions\/runs\/(\d+)/.exec(url)
+  if (!m) return null
+  const [, host = '', owner = '', repo = '', runId = ''] = m
+
+  return { host, owner, repo, runId }
+}
+
+/** The distinct Actions runs behind a PR's failing checks, in check order. */
+export function failedRuns(pr: PrSnapshot): RunRef[] {
+  const out: RunRef[] = []
+  for (const c of pr.checks) {
+    if (c.state !== 'fail') continue
+    const ref = parseRunUrl(c.url)
+    if (ref && !out.some(r => r.runId === ref.runId && r.repo === ref.repo)) out.push(ref)
+  }
+
+  return out
+}
+
+/** `gh run rerun <id> --failed`: only the run's failed jobs run again. */
+export function rerunFailedArgv(ref: RunRef): string[] {
+  return ['gh', 'run', 'rerun', ref.runId, '--failed', '-R', `${ref.host}/${ref.owner}/${ref.repo}`]
+}
+
 /** The repo's allowed merge methods, from `gh repo view --json …Allowed`. */
 export function mergeMethodsArgv(ref: RepoRef): string[] {
   return ['gh', 'repo', 'view', `${ref.host}/${ref.owner}/${ref.repo}`, '--json', 'mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed']

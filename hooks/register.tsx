@@ -6,6 +6,7 @@ import {
   allowedMethods,
   checkCounts,
   diffSnapshots,
+  failedRuns,
   fixCheckPrompt,
   fixPrompt,
   isConflicting,
@@ -23,7 +24,9 @@ import {
   pickMethod,
   REPO_ARGV,
   pinKey,
+  parseRunUrl,
   prViewArgv,
+  rerunFailedArgv,
   resolveConflictsPrompt,
   threadsArgv,
 } from './gh'
@@ -98,6 +101,23 @@ async function fixCheck($: EngineInterface, pr: PrSnapshot, check: PrCheck, bran
   const isCheckedOut = branch !== '' && branch === pr.head
   await $.prompt.submit({ text: fixCheckPrompt(pr, check, isCheckedOut) })
   $.ui.toast(`PR #${pr.number}: ${check.name} handed to Claude`, { timeoutMs: 4_000 })
+}
+
+/** `u` / a check's `rerun`: `gh run rerun --failed` on each Actions run behind the failing checks, then poll soon. */
+async function rerunFailed($: EngineInterface, pr: PrSnapshot, checks?: PrCheck[]) {
+  const runs = checks
+    ? checks.map(c => parseRunUrl(c.url)).filter((r): r is NonNullable<typeof r> => r !== null)
+    : failedRuns(pr)
+  if (!runs.length) return void $.ui.toast(`PR #${pr.number}: no GitHub Actions run to rerun`, { timeoutMs: 4_000 })
+  const failed: string[] = []
+  for (const ref of runs) {
+    const run = await $.process.run(rerunFailedArgv(ref), { timeoutMs: 30_000 })
+    if (run.exitCode !== 0) failed.push(`${ref.runId}: ${(run.stderr.trim() || run.stdout.trim() || `gh exited ${run.exitCode}`).split('\n')[0]}`)
+  }
+  const ok = runs.length - failed.length
+  if (ok) $.ui.toast(`PR #${pr.number}: rerunning failed jobs of ${ok} run${ok === 1 ? '' : 's'}`, { timeoutMs: 4_000 })
+  for (const f of failed) $.ui.toast(`Rerun failed · ${f}`, { timeoutMs: 8_000 })
+  if (ok) schedule($, 4_000)
 }
 
 /** `gh pr view --web`: gh opens the person's browser ($BROWSER, gh's `browser` config, or the OS default). */
@@ -640,6 +660,7 @@ export const register: Register = on => {
         $.ui.toast('Fix prompt placed in the composer')
       },
       fixCheck: (pr, check) => void fixCheck($, pr, check, track.branch).catch(err => $.ui.toast(`Fix failed: ${String(err)}`)),
+      rerun: (pr, checks) => void rerunFailed($, pr, checks).catch(err => $.ui.toast(`Rerun failed: ${String(err)}`)),
       select: key => void select($, key),
       unpin: key => void unpin($, key),
       pick: item => void pick($, item),

@@ -1,7 +1,7 @@
 import type { EngineInterface, RenderElement } from 'claude-code'
 
 import type { CheckState, GreptileScore, MineFilter, PrCheck, PrMerge, PrComment, PrSection, PrEntry, PrListItem, PrMine, PrSnapshot, PrThread, PrTrack, PrView } from '../types'
-import { MINE_FILTERS, ago, greptileColor, isConflicting, checkCounts, cleanBody, clip, isFilterMatch, isQueryMatch, preview, reviewVerb } from './gh'
+import { MINE_FILTERS, ago, failedRuns, greptileColor, parseRunUrl, isConflicting, checkCounts, cleanBody, clip, isFilterMatch, isQueryMatch, preview, reviewVerb } from './gh'
 import { rich } from './md'
 
 type Els = ReturnType<EngineInterface['ui']['resolve']>
@@ -38,6 +38,8 @@ export type Actions = {
   fix: (pr: PrSnapshot) => void
   /** one failing check: hand it to Claude with T3 Code's prompt */
   fixCheck: (pr: PrSnapshot, check: PrCheck) => void
+  /** `gh run rerun --failed` on the Actions runs behind these checks (all failing ones when omitted) */
+  rerun: (pr: PrSnapshot, checks?: PrCheck[]) => void
   /** the PR in the default browser (`gh pr view --web`) */
   openWeb: (pr: PrSnapshot) => void
   close: () => void
@@ -466,6 +468,9 @@ function prKeys(L: Layout, m: Model, pr: PrSnapshot | null, a: Actions): Key[] {
     }
     if (pr.state === 'OPEN' && (s.counts.fail > 0 || s.unresolved > 0)) {
       out.push({ key: 'fix', hotkey: 'f', label: 'fix', onPress: () => a.fix(pr) })
+    }
+    if (pr.state === 'OPEN' && failedRuns(pr).length > 0) {
+      out.push({ key: 'rerun', hotkey: 'u', label: 'rerun failed', onPress: () => a.rerun(pr) })
     }
   }
   const isPeek = m.selected === (m.track.peek ?? '')
@@ -947,7 +952,8 @@ function detail(els: Els, L: Layout, m: Model, pr: PrSnapshot, a: Actions): Node
           </Box>
         )}
         {isOpen && c.state === 'fail' && (
-          <Box flexShrink={0} marginLeft={1}>
+          <Box flexShrink={0} marginLeft={1} columnGap={1}>
+            {parseRunUrl(c.url) && <Button key={`rerun-check:${c.workflow}/${c.name}`} plain label="rerun" onPress={() => a.rerun(pr, [c])} />}
             <Button key={`fix-check:${c.workflow}/${c.name}`} plain label="fix" onPress={() => a.fixCheck(pr, c)} />
           </Box>
         )}
