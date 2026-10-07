@@ -169,6 +169,10 @@ const searchKey = () => (searchGen ? `search-${searchGen}` : 'search')
 // terminal width last seen, and the dock width last asked for it
 let termColumns = 0
 let askedColumns = 0
+// full was asked and the dock did not widen (a dragged width is kept): said once per ask
+let isFullRefusedSaid = false
+/** Full granted: the transcript keeps the engine's 24 columns beside the dock; wider means the ask was overridden. */
+const FULL_TRANSCRIPT_MAX = 30
 
 /** Opens the pane, asking a dock width that suits the terminal (all of it while `isFull`). */
 async function seat($: EngineInterface) {
@@ -180,6 +184,7 @@ async function seat($: EngineInterface) {
 /** Flips the dock between the whole terminal and its share, and re-asks the width. */
 async function toggleFull($: EngineInterface) {
   const v = await update($, viewAtom, v => ({ ...v, isFull: !v.isFull }))
+  isFullRefusedSaid = false
   await reseat($)
 
   return Boolean(v.isFull)
@@ -617,6 +622,10 @@ export const register: Register = on => {
       termColumns = term
       askedColumns = wanted
       $.clock.after(0, () => void reseat($))
+    } else if (term > FULL_TRANSCRIPT_MAX && view.isFull && e.props.placement === 'dock' && !isFullRefusedSaid) {
+      // the engine gives a width the person dragged (this session or kept in ~/.claude.json) priority over any ask
+      isFullRefusedSaid = true
+      $.ui.toast('Full width refused: a dragged dock width is kept. Drag the divider, or remove pluginPanes.dockColumns from ~/.claude.json and restart.')
     }
     const L = layoutFor(e.props.bodyColumns, e.props.scroll.bodyRows, e.props.isFocused, {
       offset: e.props.scroll.offset,
