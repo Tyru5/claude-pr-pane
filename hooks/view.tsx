@@ -1,6 +1,6 @@
 import type { EngineInterface, RenderElement } from 'claude-code'
 
-import type { CheckState, GreptileScore, MineFilter, PrMerge, PrComment, PrSection, PrEntry, PrListItem, PrMine, PrSnapshot, PrThread, PrTrack, PrView } from '../types'
+import type { CheckState, GreptileScore, MineFilter, PrCheck, PrMerge, PrComment, PrSection, PrEntry, PrListItem, PrMine, PrSnapshot, PrThread, PrTrack, PrView } from '../types'
 import { MINE_FILTERS, ago, greptileColor, isConflicting, checkCounts, cleanBody, clip, isFilterMatch, isQueryMatch, preview, reviewVerb } from './gh'
 import { rich } from './md'
 
@@ -36,6 +36,8 @@ export type Actions = {
   cycleMethod: () => void
   cancelMerge: () => void
   fix: (pr: PrSnapshot) => void
+  /** one failing check: hand it to Claude with T3 Code's prompt */
+  fixCheck: (pr: PrSnapshot, check: PrCheck) => void
   /** the PR in the default browser (`gh pr view --web`) */
   openWeb: (pr: PrSnapshot) => void
   close: () => void
@@ -858,7 +860,7 @@ export function drawPane(els: Els, L: Layout, m: Model, a: Actions): Node {
 
 /** One PR in full: header, description, checks, reviews, threads, comments. */
 function detail(els: Els, L: Layout, m: Model, pr: PrSnapshot, a: Actions): Node[] {
-  const { Box, Text, Link } = els
+  const { Box, Text, Link, Button } = els
   const { view } = m
   const isOpen = pr.state === 'OPEN'
   const badge = badgeOf(pr)
@@ -942,6 +944,11 @@ function detail(els: Els, L: Layout, m: Model, pr: PrSnapshot, a: Actions): Node
         {isWide && c.workflow && (
           <Box flexShrink={0} marginLeft={1}>
             <Text dimColor>{clip(c.workflow, workflowCols)}</Text>
+          </Box>
+        )}
+        {isOpen && c.state === 'fail' && (
+          <Box flexShrink={0} marginLeft={1}>
+            <Button key={`fix-check:${c.workflow}/${c.name}`} plain label="fix" onPress={() => a.fixCheck(pr, c)} />
           </Box>
         )}
       </Box>

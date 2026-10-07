@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, Timer } from 'claude-code'
 
-import type { MineFilter, PrEntry, PrListItem, PrMerge, PrMine, PrSnapshot, PrTrack, PrView } from '../types'
+import type { MineFilter, PrCheck, PrEntry, PrListItem, PrMerge, PrMine, PrSnapshot, PrTrack, PrView } from '../types'
 import {
   allowedMethods,
   checkCounts,
   diffSnapshots,
+  fixCheckPrompt,
   fixPrompt,
   isConflicting,
   hostOf,
@@ -90,6 +91,13 @@ async function startMerge($: EngineInterface, key: string, pr: PrSnapshot, branc
     }
   }
   await update($, mergeAtom, () => ({ key, status: 'confirm' as const, methods, method: pickMethod(methods) }))
+}
+
+/** A failing check's `fix`: handed to Claude with T3 Code's prompt, like a conflict. */
+async function fixCheck($: EngineInterface, pr: PrSnapshot, check: PrCheck, branch: string) {
+  const isCheckedOut = branch !== '' && branch === pr.head
+  await $.prompt.submit({ text: fixCheckPrompt(pr, check, isCheckedOut) })
+  $.ui.toast(`PR #${pr.number}: ${check.name} handed to Claude`, { timeoutMs: 4_000 })
 }
 
 /** `gh pr view --web`: gh opens the person's browser ($BROWSER, gh's `browser` config, or the OS default). */
@@ -631,6 +639,7 @@ export const register: Register = on => {
         void $.prompt.fill({ text: fixPrompt(pr), mode: 'replace' })
         $.ui.toast('Fix prompt placed in the composer')
       },
+      fixCheck: (pr, check) => void fixCheck($, pr, check, track.branch).catch(err => $.ui.toast(`Fix failed: ${String(err)}`)),
       select: key => void select($, key),
       unpin: key => void unpin($, key),
       pick: item => void pick($, item),
