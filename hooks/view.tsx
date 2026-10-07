@@ -1,6 +1,7 @@
 import type { EngineInterface, RenderElement } from 'claude-code'
 
 import type { CheckState, GreptileScore, MineFilter, PrCheck, PrMerge, PrComment, PrSection, PrEntry, PrListItem, PrMine, PrSnapshot, PrThread, PrTrack, PrView } from '../types'
+import type { PrFinding } from './gh'
 import { MINE_FILTERS, ago, failedRuns, greptileColor, parseRunUrl, isConflicting, checkCounts, cleanBody, clip, isFilterMatch, isQueryMatch, preview, reviewVerb } from './gh'
 import { rich } from './md'
 
@@ -40,6 +41,8 @@ export type Actions = {
   fix: (pr: PrSnapshot) => void
   /** one failing check: hand it to Claude with T3 Code's prompt */
   fixCheck: (pr: PrSnapshot, check: PrCheck) => void
+  /** one review thread or comment: T3 Code's prompt into the composer, unsent */
+  fixFinding: (pr: PrSnapshot, finding: PrFinding) => void
   /** `gh run rerun --failed` on the Actions runs behind these checks (all failing ones when omitted) */
   rerun: (pr: PrSnapshot, checks?: PrCheck[]) => void
   /** the PR in the default browser (`gh pr view --web`) */
@@ -347,7 +350,18 @@ function toggle(els: Els, id: string, isOpen: boolean, a: Actions): Node {
   return <Button key={`open:${id}`} plain label={isOpen ? '▾' : '▸'} dimColor onPress={() => a.toggleOpen(id)} />
 }
 
-function threadCard(els: Els, L: Layout, m: Model, t: PrThread, isFirst: boolean, a: Actions): Node {
+/** `fix` on a card: the ring reaches it, Enter hands the finding to the composer. */
+function fixButton(els: Els, pr: PrSnapshot, id: string, finding: PrFinding, a: Actions): Node {
+  const { Box, Button } = els
+
+  return (
+    <Box flexShrink={0} marginLeft={1}>
+      <Button key={`fix-finding:${id}`} plain dimColor label="fix" onPress={() => a.fixFinding(pr, finding)} />
+    </Box>
+  )
+}
+
+function threadCard(els: Els, L: Layout, m: Model, pr: PrSnapshot, t: PrThread, isFirst: boolean, a: Actions): Node {
   const { Box, Text } = els
   const first = t.comments[0]
   const isOpen = isFull(m, 'Threads') || (m.view.openIds ?? []).includes(t.id)
@@ -368,6 +382,7 @@ function threadCard(els: Els, L: Layout, m: Model, t: PrThread, isFirst: boolean
           <Text dimColor>{state}</Text>
         </Box>
       )}
+      {pr.state === 'OPEN' && first && fixButton(els, pr, t.id, { kind: 'thread', thread: t }, a)}
     </Box>,
     first ? (
       <Text wrap="truncate">
@@ -397,7 +412,7 @@ function threadCard(els: Els, L: Layout, m: Model, t: PrThread, isFirst: boolean
   ].filter(Boolean) as Node[])
 }
 
-function commentCard(els: Els, L: Layout, m: Model, c: PrComment, isFirst: boolean, a: Actions): Node {
+function commentCard(els: Els, L: Layout, m: Model, pr: PrSnapshot, c: PrComment, isFirst: boolean, a: Actions): Node {
   const { Box, Text, Link } = els
   const isOpen = isFull(m, 'Comments') || (m.view.openIds ?? []).includes(c.id)
   // bots collapse to their header until opened: their bodies are long and repetitive
@@ -425,6 +440,7 @@ function commentCard(els: Els, L: Layout, m: Model, c: PrComment, isFirst: boole
           <Link href={c.url} label="↗" />
         </Box>
       )}
+      {pr.state === 'OPEN' && c.body.trim() !== '' && fixButton(els, pr, c.id, { kind: 'comment', comment: c }, a)}
     </Box>,
     showBody ? bodyBlock(els, L, c.body, isOpen, c.isBot) : false,
   ].filter(Boolean) as Node[])
@@ -1015,14 +1031,14 @@ function detail(els: Els, L: Layout, m: Model, pr: PrSnapshot, a: Actions): Node
     )),
 
     section(els, L, m, a, 'Threads', s.threads.text, s.threads.color),
-    ...(isClosed(m, 'Threads') ? [] : threads).map((t, i) => threadCard(els, L, m, t, i === 0, a)),
+    ...(isClosed(m, 'Threads') ? [] : threads).map((t, i) => threadCard(els, L, m, pr, t, i === 0, a)),
     !isClosed(m, 'Threads') && threads.length > 0 && !view.isExpanded && moreButton(els, m, a, 'Threads', 'open all'),
 
     section(els, L, m, a, 'Comments', comments.length ? `${comments.length}` : 'none'),
     !isClosed(m, 'Comments') &&
       (comments.length > shownComments.length || (view.fullSections ?? []).includes('Comments')) &&
       moreButton(els, m, a, 'Comments', `${comments.length - shownComments.length} older`),
-    ...(isClosed(m, 'Comments') ? [] : shownComments).map((c, i) => commentCard(els, L, m, c, i === 0, a)),
+    ...(isClosed(m, 'Comments') ? [] : shownComments).map((c, i) => commentCard(els, L, m, pr, c, i === 0, a)),
   ].filter(Boolean) as Node[]
 }
 

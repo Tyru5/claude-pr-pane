@@ -8,6 +8,7 @@ import {
   diffSnapshots,
   failedRuns,
   fixCheckPrompt,
+  fixFindingPrompt,
   fixPrompt,
   isConflicting,
   hostOf,
@@ -30,6 +31,7 @@ import {
   resolveConflictsPrompt,
   threadsArgv,
 } from './gh'
+import type { PrFinding } from './gh'
 import { BRANCH, MINE, drawPane, layoutFor, paneColumns, selectedOf, tabsOf } from './view'
 import type { Actions, Model } from './view'
 
@@ -102,6 +104,19 @@ async function fixCheck($: EngineInterface, pr: PrSnapshot, check: PrCheck, bran
   const isCheckedOut = branch !== '' && branch === pr.head
   await $.prompt.submit({ text: fixCheckPrompt(pr, check, isCheckedOut) })
   $.ui.toast(`PR #${pr.number}: ${check.name} handed to Claude`, { timeoutMs: 4_000 })
+}
+
+/**
+ * A thread's or comment's `fix`: T3 Code's prompt into the composer, not sent,
+ * so the person can add to it first; a draft already there is kept above it.
+ */
+async function fixFinding($: EngineInterface, pr: PrSnapshot, finding: PrFinding, branch: string) {
+  const text = fixFindingPrompt(pr, finding, branch !== '' && branch === pr.head)
+  const draft = (await $.prompt.read()).text
+  const filled = await $.prompt.fill(draft.trim() ? { text: `\n\n${text}`, mode: 'append' } : { text, mode: 'replace' })
+  const what = finding.kind === 'thread' ? 'thread' : `@${finding.comment.author}'s comment`
+  const no = `Could not fill the composer${filled.refusal === 'dialog' ? ': close the dialog and retry' : ''}`
+  $.ui.toast(filled.isFilled ? `PR #${pr.number}: ${what} placed in the composer` : no, { timeoutMs: 4_000 })
 }
 
 /** `u` / a check's `rerun`: `gh run rerun --failed` on each Actions run behind the failing checks, then poll soon. */
@@ -682,6 +697,7 @@ export const register: Register = on => {
         $.ui.toast('Fix prompt placed in the composer')
       },
       fixCheck: (pr, check) => void fixCheck($, pr, check, track.branch).catch(err => $.ui.toast(`Fix failed: ${String(err)}`)),
+      fixFinding: (pr, finding) => void fixFinding($, pr, finding, track.branch).catch(err => $.ui.toast(`Fix failed: ${String(err)}`)),
       rerun: (pr, checks) => void rerunFailed($, pr, checks).catch(err => $.ui.toast(`Rerun failed: ${String(err)}`)),
       select: key => void select($, key),
       unpin: key => void unpin($, key),

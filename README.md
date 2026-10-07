@@ -10,7 +10,9 @@ desktop Code tab. Polls `gh` and redraws on change.
 - Tabs: the current branch's PR, pinned PRs, and your open PRs.
 - Checks with per-check actions: `f` fix (hands the failing check to Claude
   with T3 Code's prompt), `u` rerun failed (`gh run rerun --failed`).
-- Reviews, review threads, comments, Greptile scores.
+- Reviews, review threads, comments, Greptile scores. Each thread and comment
+  has a `fix`: it puts T3 Code's review-finding prompt in the composer, not
+  sent, so you can add to it first; a draft already there is kept above it.
 - Merge (`m`) using the repo's allowed method, or a conflict hand-off to Claude
   when the branch conflicts.
 
