@@ -1,3 +1,5 @@
+![pr-pane](assets/pr-pane-banner.png)
+
 # pr-pane
 
 A Claude Code mod: a live GitHub pull-request pane inside the terminal or
