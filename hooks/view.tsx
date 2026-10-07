@@ -26,6 +26,8 @@ export type Layout = {
 export type Actions = {
   refresh: () => void
   toggleView: (key: 'isExpanded' | 'isBotsHidden' | 'isResolvedShown' | 'isMoreKeys') => void
+  /** docked: the whole terminal width, or back to the share */
+  toggleFull: () => void
   toggleOpen: (id: string) => void
   /** fold / unfold a section, or draw it in full / back to its excerpt */
   toggleSection: (name: PrSection, list: 'closedSections' | 'fullSections') => void
@@ -72,10 +74,21 @@ export type Model = {
   selected: string
   /** the search field's key: a new one after each Enter, since the field empties on submit and only a new element draws the query back */
   searchKey: string
+  /** seated beside the transcript (not inline): the full-width toggle applies */
+  isDocked?: boolean
 }
 
 export const MINE = 'mine'
 export const BRANCH = 'branch'
+
+/**
+ * Dock width to ask for a terminal: ~38% of it, so the transcript keeps the
+ * larger share; full, every column (the dock clamps to what a drag could reach).
+ */
+export function paneColumns(term: number, isFull = false): number {
+  if (isFull) return Math.max(34, term)
+  return Math.max(34, Math.min(72, Math.floor(term * 0.38)))
+}
 
 export function layoutFor(
   bodyColumns: number,
@@ -493,6 +506,7 @@ function prKeys(L: Layout, m: Model, pr: PrSnapshot | null, a: Actions): Key[] {
       if ((v.closedSections ?? []).length > 0) view.push({ key: 'sections', hotkey: 's', label: 'unfold', onPress: a.openSections })
     }
   }
+  if (m.isDocked) view.push(fullKey(v, a))
   view.push({ key: 'close', hotkey: 'q', label: 'close', onPress: a.close, isDismiss: true })
   out.push({ key: 'more', hotkey: 'k', label: v.isMoreKeys ? 'less' : 'more', onPress: () => a.toggleView('isMoreKeys') })
 
@@ -514,9 +528,15 @@ function mineKeys(els: Els, m: Model, a: Actions): Key[] {
       },
     })
   }
+  if (m.isDocked) out.push(fullKey(v, a))
   out.push({ key: 'close', hotkey: 'q', label: 'close', onPress: a.close, isDismiss: true })
 
   return out
+}
+
+/** `w: full` widens the dock to the terminal; `w: split` gives the transcript its share back. */
+function fullKey(v: PrView, a: Actions): Key {
+  return { key: 'full', hotkey: 'w', label: v.isFull ? 'split' : 'full', onPress: a.toggleFull }
 }
 
 /** `─ 10:02 · feat/x · tab tab ──────`: the status folded into the footer's rule. */

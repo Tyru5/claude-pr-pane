@@ -15,7 +15,12 @@ desktop Code tab. Polls `gh` and redraws on change.
   when the branch conflicts.
 
 Hotkeys: `r` refresh, `o` open in browser, `p` pin, `x` unpin, `s` search,
-`b` bots, `t` resolved threads, `k` more/less, `q` close.
+`b` bots, `t` resolved threads, `w` full/split width (docked), `k` more/less,
+`q` close.
+
+`/pr-pane full` widens the dock to the whole terminal, as if the divider were
+dragged to the left edge; `/pr-pane split` gives the transcript its share back.
+A width you dragged by hand wins over either.
 
 ## Install
 

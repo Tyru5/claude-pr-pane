@@ -126,6 +126,8 @@ export type PrView = {
   isResolvedShown: boolean
   /** the footer's second row (view toggles) shown */
   isMoreKeys: boolean
+  /** docked: ask the whole terminal width, as if the divider were dragged to the left edge */
+  isFull: boolean
   /** comment / thread ids opened one by one */
   openIds: string[]
   /** the Mine tab's search text and filter */

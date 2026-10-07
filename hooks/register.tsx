@@ -30,7 +30,7 @@ import {
   resolveConflictsPrompt,
   threadsArgv,
 } from './gh'
-import { BRANCH, MINE, drawPane, layoutFor, selectedOf, tabsOf } from './view'
+import { BRANCH, MINE, drawPane, layoutFor, paneColumns, selectedOf, tabsOf } from './view'
 import type { Actions, Model } from './view'
 
 const PANE = 'pr'
@@ -60,6 +60,7 @@ const viewAtom = atom({ plugin: 'pr-pane', key: 'prefs' } as const, {
   isBotsHidden: false,
   isResolvedShown: false,
   isMoreKeys: false,
+  isFull: false,
   openIds: [],
   query: '',
   filter: 'all',
@@ -169,15 +170,19 @@ const searchKey = () => (searchGen ? `search-${searchGen}` : 'search')
 let termColumns = 0
 let askedColumns = 0
 
-/** Dock width for a terminal: ~38% of it, so the transcript keeps the larger share. */
-function paneColumns(term: number): number {
-  return Math.max(34, Math.min(72, Math.floor(term * 0.38)))
+/** Opens the pane, asking a dock width that suits the terminal (all of it while `isFull`). */
+async function seat($: EngineInterface) {
+  const { isFull } = await read($, viewAtom)
+  askedColumns = termColumns ? paneColumns(termColumns, Boolean(isFull)) : 0
+  return $.ui.open({ id: PANE, title: TITLE, ...(askedColumns ? { columns: askedColumns } : {}) })
 }
 
-/** Opens the pane, asking a dock width that suits the terminal. */
-function seat($: EngineInterface) {
-  askedColumns = termColumns ? paneColumns(termColumns) : 0
-  return $.ui.open({ id: PANE, title: TITLE, ...(askedColumns ? { columns: askedColumns } : {}) })
+/** Flips the dock between the whole terminal and its share, and re-asks the width. */
+async function toggleFull($: EngineInterface) {
+  const v = await update($, viewAtom, v => ({ ...v, isFull: !v.isFull }))
+  await reseat($)
+
+  return Boolean(v.isFull)
 }
 
 function patchEntry($: EngineInterface, key: string, patch: Partial<PrEntry>) {
@@ -538,8 +543,8 @@ export const register: Register = on => {
     try {
       await $.command.register({
         name: COMMAND,
-        description: 'GitHub PR pane: numbers/urls pin tabs | rm <n> | mine | branch | refresh | off',
-        argumentHint: '[<n|url>... | add <n> | rm <n> | mine | branch | refresh | off]',
+        description: 'GitHub PR pane: numbers/urls pin tabs | rm <n> | mine | branch | refresh | full | split | off',
+        argumentHint: '[<n|url>... | add <n> | rm <n> | mine | branch | refresh | full | split | off]',
         immediate: true,
       })
     } catch (err) {
@@ -565,7 +570,10 @@ export const register: Register = on => {
 
     termColumns = e.presentation.columns
     let text = 'PR pane open.'
-    if (verb === 'rm' || verb === 'unpin') {
+    if (verb === 'full' || verb === 'split') {
+      await update($, viewAtom, v => ({ ...v, isFull: verb === 'full' }))
+      text = verb === 'full' ? 'PR pane full width.' : 'PR pane split.'
+    } else if (verb === 'rm' || verb === 'unpin') {
       const keys = rest.map(pinKey).filter(Boolean)
       for (const k of keys) await unpin($, k)
       text = keys.length ? `Unpinned ${keys.map(k => `#${k}`).join(' ')}.` : `Usage: /${COMMAND} rm <number|url>`
@@ -600,11 +608,13 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const els = $.ui.resolve(e)
     isPaneFocused = e.props.isFocused
+    const view = await read($, viewAtom)
     // terminal resized: ask the dock for a width that fits it (a width the person dragged still wins)
     const term = e.viewport?.columns ?? 0
-    if (term && e.props.placement === 'dock' && paneColumns(term) !== askedColumns) {
+    const wanted = term ? paneColumns(term, Boolean(view.isFull)) : 0
+    if (term && e.props.placement === 'dock' && wanted !== askedColumns) {
       termColumns = term
-      askedColumns = paneColumns(term)
+      askedColumns = wanted
       $.clock.after(0, () => void reseat($))
     }
     const L = layoutFor(e.props.bodyColumns, e.props.scroll.bodyRows, e.props.isFocused, {
@@ -618,15 +628,17 @@ export const register: Register = on => {
       entries,
       track,
       mine: await read($, mineAtom),
-      view: await read($, viewAtom),
+      view,
       merge: await read($, mergeAtom),
       now: await $.clock.now(),
       command: COMMAND,
       tabs,
       selected: selectedOf(tabs, track.selected),
       searchKey: searchKey(),
+      isDocked: e.props.placement === 'dock',
     }
     const actions: Actions = {
+      toggleFull: () => void toggleFull($).then(isFull => $.ui.toast(isFull ? 'PR pane: full width' : 'PR pane: split')),
       refresh: () => void refresh($, { isMineDue: model.selected === MINE, isManual: true }),
       toggleView: key => {
         void update($, viewAtom, v => ({ ...v, [key]: !v[key] }))
