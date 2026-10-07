@@ -19,8 +19,10 @@ Hotkeys: `r` refresh, `o` open in browser, `p` pin, `x` unpin, `s` search,
 `q` close.
 
 `/pr-pane full` widens the dock to the whole terminal, as if the divider were
-dragged to the left edge; `/pr-pane split` gives the transcript its share back.
-A width you dragged by hand wins over either.
+dragged to the left edge (the engine keeps 24 columns for the transcript);
+`/pr-pane split` gives the transcript its share back. A width you dragged by
+hand wins over either: it is kept as `pluginPanes.dockColumns` in
+`~/.claude.json`, so remove that key and restart to let the toggle rule again.
 
 ## Install
 
