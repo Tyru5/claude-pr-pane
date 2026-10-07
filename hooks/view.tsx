@@ -514,10 +514,10 @@ function mineKeys(els: Els, m: Model, a: Actions): Key[] {
   return out
 }
 
-/** `─ 10:02 · feat/x · ctrl+x tab ──────`: the status folded into the footer's rule. */
+/** `─ 10:02 · feat/x · tab tab ──────`: the status folded into the footer's rule. */
 function ruleWith(els: Els, L: Layout, status: string, isError: boolean): Node {
   const { Box, Text } = els
-  const hint = !L.isFocused && L.tier !== 'tiny' ? ' · ctrl+x tab' : ''
+  const hint = !L.isFocused && L.tier !== 'tiny' ? ' · tab tab' : ''
   const text = clip(`${status}${hint}`, Math.max(4, L.cols - 6))
   const fill = Math.max(2, L.cols - text.length - 3)
 
