@@ -609,7 +609,8 @@ export const register: Register = on => {
     const els = $.ui.resolve(e)
     isPaneFocused = e.props.isFocused
     const view = await read($, viewAtom)
-    // terminal resized: ask the dock for a width that fits it (a width the person dragged still wins)
+    // the transcript resized: ask the dock for a width that fits it (a width the person dragged still wins);
+    // full asks a constant, so the narrowing transcript never feeds back into a new ask
     const term = e.viewport?.columns ?? 0
     const wanted = term ? paneColumns(term, Boolean(view.isFull)) : 0
     if (term && e.props.placement === 'dock' && wanted !== askedColumns) {

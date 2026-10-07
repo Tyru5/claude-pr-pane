@@ -81,12 +81,16 @@ export type Model = {
 export const MINE = 'mine'
 export const BRANCH = 'branch'
 
+/** Asked while full: the dock clamps every request live to the terminal less 24 columns. */
+export const FULL_COLUMNS = 1000
+
 /**
- * Dock width to ask for a terminal: ~38% of it, so the transcript keeps the
- * larger share; full, every column (the dock clamps to what a drag could reach).
+ * Dock width to ask for: ~38% of `term` (the transcript's width beside the
+ * pane), so the transcript keeps the larger share; full, a constant past any
+ * terminal, so a changing `term` never re-asks (that fed back into a flicker).
  */
 export function paneColumns(term: number, isFull = false): number {
-  if (isFull) return Math.max(34, term)
+  if (isFull) return FULL_COLUMNS
   return Math.max(34, Math.min(72, Math.floor(term * 0.38)))
 }
 

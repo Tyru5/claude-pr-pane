@@ -19,7 +19,7 @@ import {
   rerunFailedArgv,
   resolveConflictsPrompt,
 } from '../hooks/gh'
-import { layoutFor, packKeys, paneColumns, selectedOf, tabsOf } from '../hooks/view'
+import { FULL_COLUMNS, layoutFor, packKeys, paneColumns, selectedOf, tabsOf } from '../hooks/view'
 import { blocks, diagram, excerpt, tableLines } from '../hooks/md'
 
 const URL = 'https://github.com/acme/widgets/pull/42'
@@ -105,9 +105,9 @@ describe('layout', () => {
     expect(paneColumns(200)).toBe(72)
     expect(paneColumns(120)).toBe(45)
     expect(paneColumns(60)).toBe(34)
-    expect(paneColumns(200, true)).toBe(200)
-    expect(paneColumns(120, true)).toBe(120)
-    expect(paneColumns(20, true)).toBe(34)
+    // full: one constant whatever the transcript measures, so a redraw never re-asks
+    expect(paneColumns(200, true)).toBe(FULL_COLUMNS)
+    expect(paneColumns(120, true)).toBe(FULL_COLUMNS)
   })
 })
 
