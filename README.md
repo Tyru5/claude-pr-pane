@@ -15,6 +15,7 @@ desktop Code tab. Polls `gh` and redraws on change.
   sent, so you can add to it first; a draft already there is kept above it.
 - Merge (`m`) using the repo's allowed method, or a conflict hand-off to Claude
   when the branch conflicts.
+- Close (`c`, then `y` to confirm): `gh pr close`, unmerged; the branch stays.
 
 Hotkeys: `r` refresh, `o` open in browser, `p` pin, `x` unpin, `s` search,
 `b` bots, `t` resolved threads, `w` full/split width (docked), `k` more/less,

@@ -658,4 +658,49 @@ describe('merge', () => {
       await ui.unmount()
     })
   }
+
+  test('close asks to confirm, then runs gh pr close', async ($, on) => {
+    mock.clock(on, { now: Date.parse('2026-10-04T10:05:00Z') })
+    let pr: Record<string, unknown> = prJson()
+    const ran: string[][] = []
+    const toasts: string[] = []
+    on('process.run', async (_$, e) => {
+      ran.push([...e.argv])
+      const [tool, sub, verb] = e.argv
+      if (sub === 'pr' && verb === 'close') pr = prJson({ state: 'CLOSED' })
+      const stdout =
+        tool === 'git'
+          ? 'feat/frob\n'
+          : sub === 'pr' && verb === 'close'
+            ? ''
+            : sub === 'pr'
+              ? JSON.stringify(pr)
+              : JSON.stringify(threadsJson)
+
+      return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+    })
+    on('ui.toast', async (_$, e) => {
+      toasts.push(String(e.text))
+      return { value: undefined }
+    })
+
+    const ui = await $.ui.mount({ plugin: 'pr-pane', surface: 'terminal', component: 'Pane', requestId: 'pr', props: PANE_PROPS })
+    await ui.press({ key: 'refresh' })
+    // cancel: nothing runs
+    await ui.press({ key: 'close-pr' })
+    expect((await ui.find({ key: 'confirm-close' }))?.text).toMatch(/close #42/)
+    await ui.press({ key: 'cancel-close' })
+    expect(await ui.find({ key: 'confirm-close' })).toBeUndefined()
+    expect(ran.some(a => a[1] === 'pr' && a[2] === 'close')).toBe(false)
+
+    await ui.press({ key: 'close-pr' })
+    await ui.press({ key: 'confirm-close' })
+    expect(ran.some(a => a.join(' ') === `gh pr close ${URL}`)).toBe(true)
+    expect(toasts).toContain('Closed PR #42')
+    await ui.press({ key: 'refresh' })
+    // closed: no close (or merge) offered
+    expect(await ui.find({ key: 'close-pr' })).toBeUndefined()
+    expect(await ui.find({ key: 'merge' })).toBeUndefined()
+    await ui.unmount()
+  })
 })

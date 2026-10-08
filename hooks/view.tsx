@@ -37,7 +37,11 @@ export type Actions = {
   merge: (pr: PrSnapshot) => void
   confirmMerge: (pr: PrSnapshot) => void
   cycleMethod: () => void
+  /** cancels a merge or close being confirmed */
   cancelMerge: () => void
+  /** ask to confirm closing the PR (unmerged) */
+  closePr: () => void
+  confirmClose: (pr: PrSnapshot) => void
   fix: (pr: PrSnapshot) => void
   /** one failing check: hand it to Claude with T3 Code's prompt */
   fixCheck: (pr: PrSnapshot, check: PrCheck) => void
@@ -484,6 +488,13 @@ function prKeys(L: Layout, m: Model, pr: PrSnapshot | null, a: Actions): Key[] {
   if (pr && m.merge.key === m.selected && m.merge.status !== 'idle') {
     // confirming: the footer is the question alone
     if (m.merge.status === 'merging') return [{ key: 'merging', hotkey: 'n', label: `merging (${m.merge.method})…`, onPress: () => undefined }]
+    if (m.merge.status === 'closing') return [{ key: 'closing', hotkey: 'n', label: `closing #${pr.number}…`, onPress: () => undefined }]
+    if (m.merge.status === 'confirm-close') {
+      return [
+        { key: 'confirm-close', hotkey: 'y', label: `confirm close #${pr.number}`, onPress: () => a.confirmClose(pr) },
+        { key: 'cancel-close', hotkey: 'n', label: 'cancel', onPress: a.cancelMerge },
+      ]
+    }
     const others = m.merge.methods.length > 1
     return [
       { key: 'confirm-merge', hotkey: 'y', label: `confirm ${m.merge.method} merge`, onPress: () => a.confirmMerge(pr) },
@@ -499,6 +510,7 @@ function prKeys(L: Layout, m: Model, pr: PrSnapshot | null, a: Actions): Key[] {
     if (pr.state === 'OPEN' && !pr.isDraft) {
       out.push({ key: 'merge', hotkey: 'm', label: isConflicting(pr) ? 'resolve' : 'merge', onPress: () => a.merge(pr) })
     }
+    if (pr.state === 'OPEN') out.push({ key: 'close-pr', hotkey: 'c', label: 'close PR', onPress: a.closePr })
     if (pr.state === 'OPEN' && (s.counts.fail > 0 || s.unresolved > 0)) {
       out.push({ key: 'fix', hotkey: 'f', label: 'fix', onPress: () => a.fix(pr) })
     }

@@ -5,6 +5,7 @@ import type { MineFilter, PrCheck, PrEntry, PrListItem, PrMerge, PrMine, PrSnaps
 import {
   allowedMethods,
   checkCounts,
+  closeArgv,
   diffSnapshots,
   failedRuns,
   fixCheckPrompt,
@@ -154,6 +155,22 @@ async function confirmMerge($: EngineInterface, pr: PrSnapshot) {
   } else {
     const err = (run.stderr.trim() || run.stdout.trim() || `gh exited ${run.exitCode}`).split('\n')[0] ?? ''
     $.ui.toast(`Merge of #${pr.number} failed: ${err}`, { timeoutMs: 8_000 })
+  }
+  void refresh($)
+}
+
+/** `c` then `y`: `gh pr close`, unmerged; the branch stays. */
+async function confirmClose($: EngineInterface, pr: PrSnapshot) {
+  const m = await read($, mergeAtom)
+  if (m.status !== 'confirm-close') return
+  await update($, mergeAtom, v => ({ ...v, status: 'closing' as const }))
+  const run = await $.process.run(closeArgv(pr), { timeoutMs: 30_000 })
+  await update($, mergeAtom, () => IDLE_MERGE)
+  if (run.exitCode === 0) {
+    $.ui.toast(`Closed PR #${pr.number}`, { timeoutMs: 5_000 })
+  } else {
+    const err = (run.stderr.trim() || run.stdout.trim() || `gh exited ${run.exitCode}`).split('\n')[0] ?? ''
+    $.ui.toast(`Close of #${pr.number} failed: ${err}`, { timeoutMs: 8_000 })
   }
   void refresh($)
 }
@@ -558,7 +575,7 @@ async function resize($: EngineInterface, rows: number) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    // a merge left asking (or mid-run) by a reload starts over
+    // a merge / close left asking (or mid-run) by a reload starts over
     await update($, mergeAtom, () => IDLE_MERGE)
     try {
       await $.command.register({
@@ -690,6 +707,8 @@ export const register: Register = on => {
       cycleMethod: () =>
         void update($, mergeAtom, v => ({ ...v, method: v.methods[(v.methods.indexOf(v.method) + 1) % v.methods.length] ?? v.method })),
       cancelMerge: () => void update($, mergeAtom, () => IDLE_MERGE),
+      closePr: () => void update($, mergeAtom, () => ({ ...IDLE_MERGE, key: model.selected, status: 'confirm-close' as const })),
+      confirmClose: pr => void confirmClose($, pr),
       openSections: () => void update($, viewAtom, v => ({ ...v, closedSections: [] })),
       close: () => void $.ui.close({ id: PANE }).catch(() => undefined),
       fix: pr => {

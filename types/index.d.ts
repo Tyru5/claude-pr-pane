@@ -141,10 +141,10 @@ export type PrView = {
 
 export type MergeMethod = 'merge' | 'squash' | 'rebase'
 
-/** The merge footer: idle, asking to confirm (with the repo's allowed methods), or running gh. */
+/** The merge / close footer: idle, asking to confirm (a merge offers the repo's allowed methods), or running gh. */
 export type PrMerge = {
   key: string
-  status: 'idle' | 'confirm' | 'merging'
+  status: 'idle' | 'confirm' | 'merging' | 'confirm-close' | 'closing'
   methods: MergeMethod[]
   method: MergeMethod
 }

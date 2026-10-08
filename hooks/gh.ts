@@ -708,3 +708,8 @@ export function pickMethod(methods: MergeMethod[], preferred: MergeMethod = 'mer
 export function mergeArgv(pr: PrSnapshot, method: MergeMethod): string[] {
   return ['gh', 'pr', 'merge', pr.url, `--${method}`]
 }
+
+/** `gh pr close`: the branch is kept; GitHub can reopen the PR. */
+export function closeArgv(pr: PrSnapshot): string[] {
+  return ['gh', 'pr', 'close', pr.url]
+}
