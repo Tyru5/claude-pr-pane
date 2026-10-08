@@ -374,6 +374,9 @@ describe('multi PR', () => {
     expect(selectedOf(tabs, '')).toBe('branch')
     expect(selectedOf(tabs, '57')).toBe('57')
     expect(selectedOf(tabsOf({}, { ...track, pins: [] }), '')).toBe('mine')
+    // a closed branch tab: hidden on that branch (a pin of the same PR shows instead), back on another
+    expect(tabsOf(entries, { ...track, hiddenBranch: 'feat/frob' }).map(t => t.key)).toEqual(['mine', URL, '57'])
+    expect(tabsOf(entries, { ...track, hiddenBranch: 'feat/old' }).map(t => t.key)).toEqual(['mine', 'branch', '57'])
   })
 
   test('footer options pack to width', async () => {
@@ -508,10 +511,18 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await ui.find({ key: `tab:${P60}` })).toBeUndefined()
     expect(await searchKey()).not.toBe(before)
     expect((await ui.find({ type: 'Input' }))?.props.value).toBe('gizmo')
-    // the pinned one unpins
-    await ui.press({ key: `tab:${P57}` })
-    await ui.press({ key: 'unpin' })
+    // the pinned one unpins from its tab's own x
+    expect(await ui.find({ key: 'close-tab:mine' })).toBeUndefined()
+    await ui.press({ key: `close-tab:${P57}` })
     expect(await ui.find({ key: `tab:${P57}` })).toBeUndefined()
+    // the branch tab closes too, and stays closed across a refresh
+    await ui.press({ key: 'tab:branch' })
+    expect((await ui.find({ key: 'unpin' }))?.text).toMatch(/close tab/)
+    await ui.press({ key: 'close-tab:branch' })
+    expect(await ui.find({ key: 'tab:branch' })).toBeUndefined()
+    expect(toasts.some(t => t.startsWith('Closed the branch tab'))).toBe(true)
+    await ui.press({ key: 'refresh' })
+    expect(await ui.find({ key: 'tab:branch' })).toBeUndefined()
 
     // q closes the pane
     await ui.press({ key: 'close' })

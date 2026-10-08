@@ -139,12 +139,12 @@ function pinLabel(key: string, e: PrEntry | undefined): string {
   return `#${m ? m[1] : key}`
 }
 
-/** Mine first, then the branch's PR (when it has one), pins, the peek; a PR shown twice keeps its first tab. */
+/** Mine first, then the branch's PR (when it has one, unless closed), pins, the peek; a PR shown twice keeps its first tab. */
 export function tabsOf(entries: Record<string, PrEntry>, track: PrTrack): Tab[] {
   const tabs: Tab[] = [{ key: MINE, label: 'mine', glyph: '', color: '' }]
   const seen = new Set<string>()
   const branch = entries[BRANCH]
-  if (branch && branch.status !== 'none') {
+  if (branch && branch.status !== 'none' && !isBranchHidden(track)) {
     if (branch.pr) seen.add(branch.pr.url)
     tabs.push({
       key: BRANCH,
@@ -168,6 +168,10 @@ export function tabsOf(entries: Record<string, PrEntry>, track: PrTrack): Tab[] 
   }
 
   return tabs
+}
+
+export function isBranchHidden(track: PrTrack): boolean {
+  return Boolean(track.hiddenBranch) && track.hiddenBranch === track.branch
 }
 
 /** The tab asked for when it exists; else the branch's PR, the first pin, Mine. */
@@ -520,7 +524,8 @@ function prKeys(L: Layout, m: Model, pr: PrSnapshot | null, a: Actions): Key[] {
   }
   const isPeek = m.selected === (m.track.peek ?? '')
   if (isPeek) out.push({ key: 'pin', hotkey: 'p', label: 'pin', onPress: a.pinPeek })
-  if (m.selected !== BRANCH) out.push({ key: 'unpin', hotkey: 'x', label: isPeek ? 'close tab' : 'unpin', onPress: () => a.unpin(m.selected) })
+  const isPinned = !isPeek && m.selected !== BRANCH
+  out.push({ key: 'unpin', hotkey: 'x', label: isPinned ? 'unpin' : 'close tab', onPress: () => a.unpin(m.selected) })
 
   const view: Key[] = []
   if (pr) {
@@ -659,7 +664,7 @@ function frame(els: Els, L: Layout, content: Node[], footer: Node[]): Node {
   )
 }
 
-/** `1: mine  2: ⎇ #12 ✓  3: #34 ✗`: digits jump, the drawn tab marked. */
+/** `1: mine  2: ⎇ #12 ✓ x  3: #34 ✗ x`: digits jump, the drawn tab marked, `x` closes a PR tab. */
 function tabBar(els: Els, L: Layout, m: Model, a: Actions): Node {
   const { Box, Text, Button } = els
 
@@ -682,6 +687,11 @@ function tabBar(els: Els, L: Layout, m: Model, a: Actions): Node {
             />
             {t.glyph !== '' && <Text color={t.color}> {t.glyph}</Text>}
             {t.greptile && <Text color={greptileColor(t.greptile)}> {t.greptile.score}/{t.greptile.of}</Text>}
+            {t.key !== MINE && (
+              <Box marginLeft={1}>
+                <Button key={`close-tab:${t.key}`} plain dimColor label="x" onPress={() => a.unpin(t.key)} />
+              </Box>
+            )}
           </Box>
         )
       })}

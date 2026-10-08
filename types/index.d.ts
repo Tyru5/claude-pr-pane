@@ -92,6 +92,8 @@ export type PrTrack = {
   /** the tab drawn: `mine`, `branch`, a pin or the peek */
   selected: string
   branch: string
+  /** the branch whose tab was closed (`x`): hidden and unpolled until the branch changes or `/pr-pane branch` */
+  hiddenBranch?: string
 }
 
 /** One row of `gh pr list --author @me`. */

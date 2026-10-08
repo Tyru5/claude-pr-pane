@@ -33,7 +33,7 @@ import {
   threadsArgv,
 } from './gh'
 import type { PrFinding } from './gh'
-import { BRANCH, MINE, drawPane, layoutFor, paneColumns, selectedOf, tabsOf } from './view'
+import { BRANCH, MINE, drawPane, isBranchHidden, layoutFor, paneColumns, selectedOf, tabsOf } from './view'
 import type { Actions, Model } from './view'
 
 const PANE = 'pr'
@@ -375,7 +375,9 @@ async function refresh($: EngineInterface, opts: { isMineDue?: boolean; isManual
     const mine = await read($, mineAtom)
     const isMineDue = opts.isMineDue || track.selected === MINE || (isRepo && now - mine.fetchedAt > MINE_STALE_MS)
     const peek = track.peek && !track.pins.includes(track.peek) ? [[track.peek, track.peek]] : []
-    const targets = [...(isRepo ? [[BRANCH, '']] : []), ...track.pins.map(p => [p, p]), ...peek] as [string, string][]
+    // a closed branch tab is not polled while the branch stays the same
+    const isBranchDue = isRepo && !isBranchHidden({ ...track, branch })
+    const targets = [...(isBranchDue ? [[BRANCH, '']] : []), ...track.pins.map(p => [p, p]), ...peek] as [string, string][]
     if (!targets.length && !isMineDue) {
       isIdle = true
       stopTimer()
@@ -534,7 +536,16 @@ async function pinPeek($: EngineInterface) {
   await showStatus($)
 }
 
+/** `x` on the branch tab: hidden until the branch changes or `/pr-pane branch`. */
+async function closeBranch($: EngineInterface) {
+  await update($, trackAtom, t => ({ ...t, hiddenBranch: t.branch, selected: t.selected === BRANCH ? '' : t.selected }))
+  await forget($, BRANCH)
+  await showStatus($)
+  $.ui.toast(`Closed the branch tab · /${COMMAND} branch brings it back`, { timeoutMs: 4_000 })
+}
+
 async function unpin($: EngineInterface, key: string) {
+  if (key === BRANCH) return closeBranch($)
   const was = await read($, trackAtom)
   const url = (await read($, entriesAtom))[key]?.pr?.url ?? key
   await update($, trackAtom, t => ({
@@ -615,6 +626,7 @@ export const register: Register = on => {
       for (const k of keys) await unpin($, k)
       text = keys.length ? `Unpinned ${keys.map(k => `#${k}`).join(' ')}.` : `Usage: /${COMMAND} rm <number|url>`
     } else if (verb === 'mine' || verb === 'branch') {
+      if (verb === 'branch') await update($, trackAtom, t => ({ ...t, hiddenBranch: '' }))
       await select($, verb === 'mine' ? MINE : BRANCH)
       text = verb === 'mine' ? 'Showing your open PRs.' : 'Showing the current branch PR.'
     } else if (verb !== '' && verb !== 'refresh') {
