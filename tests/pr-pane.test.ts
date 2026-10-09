@@ -481,7 +481,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.press({ key: 'clear' })
     expect(await ui.find({ key: 'mine:57' })).toBeDefined()
 
-    // a pick opens the PR as the peek; the next pick replaces it
+    // a pick opens the PR as the peek; the next pick keeps the previous tab
     const P57 = 'https://github.com/acme/widgets/pull/57'
     const P60 = 'https://github.com/acme/widgets/pull/60'
     await ui.press({ key: 'mine:60' })
@@ -491,9 +491,20 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await ui.press({ key: 'mine:57' })
     expect(await ui.find({ type: 'Text', text: /Speed up sprocket cache/ })).toBeDefined()
     expect(await ui.find({ key: `tab:${P57}` })).toBeDefined()
-    expect(await ui.find({ key: `tab:${P60}` })).toBeUndefined()
+    expect(await ui.find({ key: `tab:${P60}` })).toBeDefined()
     // status line: the drawn PR in full, every other tracked one after it
-    expect(statuses[statuses.length - 1]).toMatch(/^PR #57 .*│ #42 ✗$/)
+    expect(statuses[statuses.length - 1]).toMatch(/^PR #57 .*│ #42 ✗ │ #60 /)
+    // reopening a kept PR selects its existing tab and retains its fetched content
+    await ui.press({ key: 'tab:mine' })
+    await ui.press({ key: 'mine:60' })
+    expect(await ui.find({ type: 'Text', text: /WIP gizmo/ })).toBeDefined()
+    expect(await ui.find({ key: 'pin' })).toBeUndefined()
+    expect(await ui.find({ key: `tab:${P57}` })).toBeDefined()
+    await ui.press({ key: `tab:${P57}` })
+    // closing the inactive tab leaves the selected PR alone
+    await ui.press({ key: `close-tab:${P60}` })
+    expect(await ui.find({ key: `tab:${P60}` })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /Speed up sprocket cache/ })).toBeDefined()
     // p keeps it; a pick of the branch's PR draws the branch tab
     await ui.press({ key: 'pin' })
     expect(await ui.find({ key: 'pin' })).toBeUndefined()

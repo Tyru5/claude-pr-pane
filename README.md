@@ -21,8 +21,9 @@ Hotkeys: `r` refresh, `o` open in browser, `p` pin, `x` unpin / close tab,
 `s` search, `b` bots, `t` resolved threads, `w` full/split width (docked),
 `k` more/less, `q` close.
 
-Each PR tab has its own `x`. A closed branch tab stays closed until the branch
-changes or `/pr-pane branch`.
+Opening a PR from Mine keeps previously opened PR tabs. Each PR tab has its
+own `x`. A closed branch tab stays closed until the branch changes or
+`/pr-pane branch`.
 
 `/pr-pane full` widens the dock to the whole terminal, as if the divider were
 dragged to the left edge (the engine keeps 24 columns for the transcript);

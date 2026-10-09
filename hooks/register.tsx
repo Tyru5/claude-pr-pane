@@ -509,8 +509,8 @@ async function pin($: EngineInterface, keys: string[]) {
 }
 
 /**
- * A Mine row: its tab when one shows it already, else it opens as the peek,
- * the one unpinned tab, which the next pick replaces (`p` keeps it).
+ * A Mine row: select its existing tab, or keep the previous peek as a pin
+ * before opening the new PR. Tabs stay open until explicitly closed.
  */
 async function pick($: EngineInterface, item: PrListItem) {
   const entries = await read($, entriesAtom)
@@ -520,9 +520,13 @@ async function pick($: EngineInterface, item: PrListItem) {
   )
   if (hit) return select($, hit.key)
 
-  const old = track.peek ?? ''
-  await update($, trackAtom, t => ({ ...t, isPaused: false, peek: item.url, selected: item.url }))
-  if (old && !track.pins.includes(old)) await forget($, old)
+  await update($, trackAtom, t => ({
+    ...t,
+    isPaused: false,
+    pins: t.peek && !t.pins.includes(t.peek) ? [...t.pins, t.peek] : t.pins,
+    peek: item.url,
+    selected: item.url,
+  }))
   focusKey($, `tab:${item.url}`)
   await loadNow($, item.url)
 }
